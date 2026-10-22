@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-groundstation}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  influx-a:
+    image: influxdb:2.7-alpine
+    restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_A_ORG:-groundstation}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_A_BUCKET:-sat_a}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_A_TOKEN:?Set INFLUX_A_TOKEN}
+    volumes: [influx_a_data:/var/lib/influxdb2]
+    ports: ["127.0.0.1:8086:8086"]
+  influx-b:
+    image: influxdb:2.7-alpine
+    restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUX_B_ORG:-groundstation}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUX_B_BUCKET:-sat_b}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_B_TOKEN:?Set INFLUX_B_TOKEN}
+    volumes: [influx_b_data:/var/lib/influxdb2]
+    ports: ["127.0.0.1:8087:8086"]
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      influx-a: {condition: service_started}
+      influx-b: {condition: service_started}
+    command: sh -c 'alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000'
+  sync:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres: {condition: service_healthy}
+      influx-a: {condition: service_started}
+      influx-b: {condition: service_started}
+    command: sh -c 'sleep 10 && python -m app.sync'
+volumes:
+  postgres_data:
+  influx_a_data:
+  influx_b_data:
